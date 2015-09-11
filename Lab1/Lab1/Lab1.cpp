@@ -7,18 +7,26 @@ struct point
 	double x = 0.0f, y = 0.0f;
 };
 
-vector<string> ParseArgs(const string &args)
+vector<string> ParseArgs(const string &args, bool &err)
 {
 	vector<string> res;
 	istringstream iss(args);
+	vector<string> points;
 	string curBigToken;
 	while (getline(iss, curBigToken, ' '))
 	{
 		istringstream new_iss(curBigToken);
 		string curSmallToken;
+		int count = 0;
 		while (getline(new_iss, curSmallToken, ','))
 		{
+			count++;
 			res.push_back(curSmallToken);
+		}
+		if (count != 2)
+		{
+			err = true;
+			return res;
 		}
 	}
 
@@ -60,10 +68,22 @@ int main(int argc, char* argv[])
 		allArgs += " ";
 	}
 	
-	auto newArgs = ParseArgs(allArgs);
+	bool err = false;
+	
+	auto newArgs = ParseArgs(allArgs, err);
+	if (err)
+	{
+		printf_s("Wrong format\n");
+		return 0;
+	}
 	if (newArgs.size() < 6)
 	{
 		printf_s("Not enough arguments\n");
+		return 0;
+	}
+	if (newArgs.size() > 6)
+	{
+		printf_s("Too many arguments\n");
 		return 0;
 	}
 
