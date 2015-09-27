@@ -12,110 +12,134 @@ namespace DeadLinks
 {
     class Program
     {
+        static HttpWebResponse GetLinkResponse(string baseUrl, out Uri newUrl, string relativeUrl = "")
+        {
+            Uri baseUri = null;
+            newUrl = null;
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out baseUri))
+            {
+                return null;
+            }
+
+            Uri url = null;
+            if (relativeUrl == null || relativeUrl == "")
+            {
+                url = baseUri;
+            }
+            else
+            {
+                if (!Uri.TryCreate(baseUri, relativeUrl, out url))
+                {
+                    return null;
+                }
+            }
+
+            newUrl = url;
+            HttpWebRequest req = null;
+            try
+            {
+                req = (HttpWebRequest)WebRequest.Create(url);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Strange URL : {0}", url.ToString());
+                return null;
+            } 
+
+            req.Method = "GET";
+            req.AllowAutoRedirect = true;
+            req.MaximumAutomaticRedirections = 5;
+            req.Timeout = 5000;
+
+            HttpWebResponse response = null;
+            try
+            {
+                if ((response = req.GetResponse() as HttpWebResponse) == null)
+                {
+                    return null;
+                }
+            }
+            catch (WebException e)
+            {
+                var errResp = (HttpWebResponse)(e.Response);
+
+                if (response != null)
+                {
+                    response.Close();
+                }
+                if (errResp != null)
+                {
+                    errResp.Close();
+                }
+
+                return errResp;
+            }
+            finally
+            {
+                if (response != null)
+                {
+                    response.Close();
+                }
+            }
+
+            return response;
+        }
+
         static void ParsePage(string url)
         {
-            Uri siteUrl;
             HashSet<string> sites = new HashSet<string>();
             Hashtable deadLinks = new Hashtable();
             StreamWriter allSites = new StreamWriter("report.txt");
-            try
+            Regex r = new Regex(@"(?: href\s*=)(?:[\s""']*)(?!#|mailto|location.|javascript|.*css|.*this\.)(?<url>.*?)(?:[\s>""'])", RegexOptions.IgnoreCase);
+            Uri temp;
+            var mainResponse = GetLinkResponse(url, out temp, null);
+            if (mainResponse != null)
             {
-                siteUrl = new Uri(url);
-                
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(siteUrl);
-                req.Timeout = 3000;
-                req.MaximumAutomaticRedirections = 5;
-
-                HttpWebResponse response = (HttpWebResponse)req.GetResponse();
-                int responseCode = (int)response.StatusCode;
-                allSites.WriteLine("{0} - {1}", url, responseCode);
-
-                if (responseCode % 100 > 3)
+                string hostName = temp.Host;
+                using (WebClient web = new WebClient())
                 {
-                    deadLinks.Add(url, responseCode);
-                }
-                sites.Add(url);
-                
-                response.Close();
-            }
-            catch(Exception e)
-            {
-                Console.WriteLine("{0} - wrong url.", url);
-                Console.WriteLine(e.Message);
-                return;
-            }
+                    string code = web.DownloadString(url);
 
-            Regex r = new Regex(@"<a.*?href=(""|')(?<href>.*?)(""|').*?>(?<value>.*?)</a>");
-            string mainDomain = siteUrl.AbsoluteUri, mainHost = siteUrl.Host;
-            using (WebClient web = new WebClient())
-            {
-                string code = web.DownloadString(url);
-
-                foreach (Match match in r.Matches(code))
-                {
-                    string site = match.Groups["href"].Value;
-                    if (site.Length > 0 && site[0] == '#')
+                    foreach (Match match in r.Matches(code))
                     {
-                        site = url;
-                    }
-                    else
-                    {
-                        if (site.Length > 0 && site[0] == '/')
+                        string newLink = match.Groups["url"].Value;
+                        Uri newUri;
+                        var response = GetLinkResponse(url, out newUri, newLink);
+                        int responseCode = 0;
+                        string newHost = response == null ? "" : newUri.Host;
+                        if (response != null)
                         {
-                            if (site.Length > 1 && site[1] == '/')
+                            if (newHost == hostName)
                             {
-                                site = site.Substring(2, site.Length - 2);
+                                responseCode = (int)response.StatusCode;
+
+                                if (sites.Add(response.ResponseUri.ToString()))
+                                {
+                                    allSites.WriteLine("{0} - {1}", response.ResponseUri, responseCode);
+                                }
+
+                                if (responseCode != 200 && responseCode != 301)
+                                {
+                                    if (!deadLinks.Contains(response.ResponseUri.ToString()))
+                                    {
+                                        deadLinks.Add(response.ResponseUri.ToString(), responseCode);
+                                    }
+                                }
                             }
-                            else
-                            {
-                                site = site.Substring(1, site.Length - 1);
-                                site = mainDomain + site;
-                            }
+
+                            response.Close();
                         }
-                    }
-
-                    Uri newSite;
-                    try
-                    {
-                        newSite = new Uri(site);
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("{0} - {1}", site, e.Message);
-                        continue;
-                    }
-
-                    if (newSite.Host != mainHost || !sites.Add(site))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(newSite);
-                        req.Timeout = 3000;
-                        req.MaximumAutomaticRedirections = 5;
-
-                        HttpWebResponse response = (HttpWebResponse)req.GetResponse();
-                        int responseCode = (int)response.StatusCode;
-                        allSites.WriteLine(site + " - " + responseCode);
-
-                        if (responseCode % 100 > 3)
-                        {
-                            deadLinks.Add(site, responseCode);
-                        }
-
-                        response.Close();
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("{0} - {1}", site, e.Message);
                     }
                 }
             }
-
+            else 
+            {
+                Console.WriteLine("Bad link : {0}", url);
+            }
+            
             if (deadLinks.Count > 0)
             {
+                allSites.WriteLine();
                 allSites.WriteLine("Dead links: ");
                 foreach (DictionaryEntry pair in deadLinks)
                 {
