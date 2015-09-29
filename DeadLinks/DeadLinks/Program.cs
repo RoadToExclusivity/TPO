@@ -46,7 +46,7 @@ namespace DeadLinks
                 return null;
             } 
 
-            req.Method = "GET";
+            req.Method = "HEAD";
             req.AllowAutoRedirect = true;
             req.MaximumAutomaticRedirections = 5;
             req.Timeout = 5000;
